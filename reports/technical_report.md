@@ -48,15 +48,15 @@ To respect patient privacy regulations (HIPAA, GDPR) and eliminate sensitive hea
 | `previous_no_shows`| Integer | Historical missed visits before this booking ($\le previous\_appointments$) | Prior behavioral track record |
 | `sms_opt_in` | Binary | 1 = Opted in for SMS alerts, 0 = Not opted in | Communication accessibility |
 | `lead_time_days` | Integer | Calculated days between booking and appointment ($appointment\_date - booking\_date$) | Forgetting curve window |
-| `no_show` (Target) | Binary | 0 = Patient Attended, 1 = Patient Missed Appointment | Target variable |
+| `no_show` (Target) | Binary | 0 = Patient Attended (73%), 1 = Patient Missed Appointment (27%) | Target variable |
 
 ---
 
 ## 4. Exploratory Data Analysis (EDA) Observations
-Exploratory data analysis was conducted and 5 primary charts were generated in `reports/figures/`:
+Exploratory data analysis was conducted and 8 primary charts were generated in `reports/figures/`:
 
 1. **Target Distribution (`01_target_distribution.png`):**
-   - Out of 3,500 appointments, **2,570 (73.43%) were attended** and **930 (26.57%) were no-shows**.
+   - Out of 3,500 appointments, **73.0% were attended** and **27.0% were no-shows**.
    - This ~27% missed appointment rate reflects empirical hospital outpatient no-show benchmarks and establishes a class imbalance where predicting the majority class yields high dummy accuracy but zero operational value.
 2. **Departmental Variation (`02_noshow_by_department.png`):**
    - Elective and routine clinics like Dermatology (30.8%) and General Medicine (28.7%) experience higher no-show rates.
@@ -91,8 +91,8 @@ Appointments were ordered chronologically by `booking_date` and segmented into t
 
 | Partition | Record Count | Percentage | Date Range | Primary Role |
 | :--- | :--- | :--- | :--- | :--- |
-| **Training Set** | 2,450 | 70% | 2025-01-01 to 2025-05-10 | Model fitting and parameter estimation |
-| **Validation Set**| 525 | 15% | 2025-05-10 to 2025-06-03 | Model comparison and decision threshold tuning |
+| **Training Set** | 2,450 | 70% | 2025-01-01 to 2025-05-07 | Model fitting and parameter estimation |
+| **Validation Set**| 525 | 15% | 2025-05-07 to 2025-06-03 | Model comparison and decision threshold tuning |
 | **Held-out Test Set**| 525 | 15% | 2025-06-03 to 2025-06-30 | Final untouched real-world simulation |
 
 This ensures that model performance reflects true future deployment, predicting appointments that occur *after* all training records were scheduled.
@@ -115,61 +115,61 @@ In standard binary classification, the default decision threshold is 0.50. Howev
 ### Threshold Evaluation on the Validation Set (Random Forest):
 | Threshold ($\tau$) | Precision | Recall | F1-Score | TP (Caught) | FP (Extra Calls) | FN (Missed) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **0.30** | 0.2742 | **0.9683** | 0.4273 | 122 | 323 | 4 |
-| **0.40 (Selected)** | **0.3311** | **0.8016** | **0.4687** | **101** | **204** | **25** |
-| **0.50 (Default)** | 0.3454 | 0.5317 | 0.4188 | 67 | 127 | 59 |
-| **0.60** | 0.4318 | 0.3016 | 0.3551 | 38 | 50 | 88 |
-| **0.70** | 0.6667 | 0.0476 | 0.0889 | 6 | 3 | 120 |
+| **0.30** | 0.2812 | **0.9712** | 0.4362 | 135 | 345 | 4 |
+| **0.40 (Selected)** | **0.3240** | **0.8345** | **0.4668** | **116** | **242** | **23** |
+| **0.50 (Default)** | 0.4011 | 0.5108 | 0.4494 | 71 | 106 | 68 |
+| **0.60** | 0.3810 | 0.1151 | 0.1768 | 16 | 26 | 123 |
+| **0.70** | 0.7143 | 0.0360 | 0.0685 | 5 | 2 | 134 |
 
 **Threshold Selection Decision:**  
-The **0.40 threshold** was selected. At $\tau = 0.40$, Recall increases from 53.2% (default) to **80.2%**, successfully capturing 101 out of 126 missed appointments while keeping false reminder calls within manageable hospital staffing capacity.
+The **0.40 threshold** was selected. At $\tau = 0.40$, Recall increases from 51.1% (default) to **83.5%**, successfully capturing 116 out of 139 missed appointments while keeping false reminder calls within manageable hospital staffing capacity.
 
 ---
 
 ## 9. Final Test Set Evaluation Results
-The final models were evaluated on the untouched held-out test set (525 records: 389 attended, 136 no-shows):
+The final models were evaluated on the untouched held-out test set (525 records: 380 attended, 145 no-shows):
 
 | Evaluation Metric | Dummy Baseline ($\tau=0.50$) | Logistic Regression ($\tau=0.50$) | Random Forest ($\tau=0.40$) |
 | :--- | :--- | :--- | :--- |
-| **Accuracy** | **0.7410 (74.1%)** | 0.6743 (67.4%) | 0.5848 (58.5%) |
-| **Precision** | 0.0000 (0.0%) | **0.4022 (40.2%)** | 0.3615 (36.2%) |
-| **Recall (Sensitivity)**| 0.0000 (0.0%) | 0.5294 (52.9%) | **0.7868 (78.7%)** |
-| **F1-Score** | 0.0000 | 0.4571 | **0.4954** |
-| **ROC-AUC** | 0.5000 | **0.6961** | 0.6929 |
-| **Brier Score** | **0.1921** | 0.2164 | 0.2087 |
+| **Accuracy** | **0.7238 (72.4%)** | 0.6400 (64.0%) | 0.4971 (49.7%) |
+| **Precision** | 0.0000 (0.0%) | **0.4026 (40.3%)** | 0.3361 (33.6%) |
+| **Recall (Sensitivity)**| 0.0000 (0.0%) | 0.6276 (62.8%) | **0.8414 (84.1%)** |
+| **F1-Score** | 0.0000 | **0.4906** | 0.4803 |
+| **ROC-AUC** | 0.5000 | **0.6931** | 0.6560 |
+| **Brier Score** | **0.2000** | 0.2252 | 0.2206 |
 
 ### Confusion Matrix on Held-Out Test Set (Random Forest, $\tau = 0.40$):
 ```
                        PREDICTED
                  Attended (0)    No-Show (1)
 ACTUAL
-Attended (0)      TN = 200        FP = 189
-No-Show (1)       FN = 29         TP = 107
+Attended (0)      TN = 139        FP = 241
+No-Show (1)       FN = 23         TP = 122
 ```
-- **Total No-Shows in Test Data:** 136
-- **No-Shows Correctly Caught (TP):** **107 (78.7%)**
-- **No-Shows Missed (FN):** Only 29 (21.3%)
-- **True Attendees (TN):** 200
+- **Total No-Shows in Test Data:** 145
+- **No-Shows Correctly Caught (TP):** **122 (84.1% Recall!)**
+- **No-Shows Missed (FN):** Only 23 missed visits.
+- **True Attendees (TN):** 139
 
 ### Why Accuracy is Misleading:
-The Dummy Baseline achieved 74.1% accuracy by predicting that every single patient would attend. Yet, its Recall was 0.0%, meaning it caught **zero** missed appointments. The Random Forest model with threshold 0.40 caught **107 out of 136 no-shows (78.7% recall)** and achieved the highest overall F1-score (0.4954), making it the superior operational system.
+The Dummy Baseline achieved 72.4% accuracy by predicting that every single patient would attend. Yet, its Recall was 0.0%, meaning it caught **zero** missed appointments. The Random Forest model with threshold 0.40 caught **122 out of 145 no-shows (84.1% recall)**, making it the superior operational system for preventive reminders.
 
 ---
 
 ## 10. Probability Calibration & Diagnostic Analysis
-- **ROC Curve (`reports/figures/07_roc_curve.png`):** Demonstrates an AUC of ~0.693 across all operating thresholds, significantly outperforming random guessing ($AUC = 0.500$).
-- **Calibration Curve (`reports/figures/08_calibration_curve.png`):** Compares predicted probabilities to empirical no-show rates across 6 probability bins. The Brier Score of **0.2087** confirms that the output probabilities reflect genuine risk gradients, making them safe for ranking appointments.
+- **ROC Curve (`reports/figures/07_roc_curve.png`):** Demonstrates an AUC of ~0.656 across all operating thresholds, significantly outperforming random guessing ($AUC = 0.500$).
+- **Calibration Curve (`reports/figures/08_calibration_curve.png`):** Compares predicted probabilities to empirical no-show rates across 6 probability bins. The Brier Score of **0.2206** confirms that the output probabilities reflect genuine risk gradients.
 
 ---
 
 ## 11. End-to-End Prediction Case Walkthrough
 Consider an actual test appointment evaluated through our saved pipeline:
-- **Patient Profile:** Young Adult (26 years old), booked an elective Dermatology Consultation through the Online Portal 21 days in advance. History: 2 previous appointments, 1 previous missed appointment, no SMS opt-in.
-- **Raw Feature Vector:** `[lead_time=21, prev_appts=2, prev_noshows=1, age='Young Adults (18-35)', type='Specialist Consultation', dept='Dermatology', channel='Online Portal', sms=0]`
+- **Patient Profile:** Young Adult (26 years old), booked an elective Dermatology Consultation through the Online Portal 21 days in advance. History: 3 previous appointments, 2 previous missed appointments, SMS opt-in = Yes.
+- **Raw Feature Vector:** `[lead_time=21, prev_appts=3, prev_noshows=2, age='Young Adults (18-35)', type='Routine Checkup', dept='Dermatology', channel='Online Portal', sms=1]`
 - **Pipeline Processing:** Numerical values scaled via StandardScaler; categories mapped via OneHotEncoder.
-- **Model Output Probability:** `predict_proba = 0.642 (64.2%)`
-- **Threshold Comparison:** $0.642 \ge 0.40 \implies$ **"Reminder Review: Suggested"**
-- **Operational Action:** Front-desk staff receive a flag in their daily morning queue: *"Patient APT-12840 has a 64% predicted probability of missing their dermatology appointment. Recommended action: Place a 1-minute courtesy confirmation call 48 hours prior."*
+- **Model Output Probability:** `predict_proba = 0.679 (67.9%)`
+- **Threshold Comparison:** $0.679 \ge 0.40 \implies$ **"Reminder Review: Suggested"**
+- **Operational Action:** Front-desk staff receive a flag in their daily morning queue: *"Patient has a 67.9% predicted probability of missing their dermatology appointment. Recommended action: Place a 1-minute courtesy confirmation call 48 hours prior."*
 
 ---
 
@@ -188,4 +188,3 @@ This project demonstrates a complete, beginner-to-intermediate B.Tech engineerin
 - Preprocessing and classifier encapsulation inside an exportable scikit-learn pipeline.
 - Threshold analysis balancing healthcare trade-offs (Recall vs. Precision).
 - Standalone inference web application built with Streamlit and verified with Pytest.
-

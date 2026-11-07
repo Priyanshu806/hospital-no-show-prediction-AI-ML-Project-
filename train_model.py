@@ -1,27 +1,29 @@
 """
-train_model.py - Model Training, Chronological Validation & Artifact Generation
+train_model.py - Machine Learning Model Training & Evaluation Pipeline
 Project: Hospital Appointment No-Show Prediction
 Assessment: ALGIONS AI LABS PRIVATE LIMITED
 
-This script:
+This script performs the complete machine learning workflow:
 1. Loads data/appointments.csv.
-2. Applies strict chronological splitting (70% Train, 15% Validation, 15% Test) to prevent temporal data leakage.
-3. Builds an end-to-end preprocessing pipeline with ColumnTransformer.
-4. Trains and compares DummyClassifier (baseline), LogisticRegression, and RandomForestClassifier.
-5. Performs decision threshold analysis on the validation set.
-6. Evaluates the best model on the untouched test set.
-7. Saves the trained pipeline and threshold metadata to models/best_model.joblib.
-8. Exports benchmark metrics to reports/model_results.csv.
+2. Applies a chronological train/validation/test split (70% / 15% / 15%).
+3. Builds a preprocessing pipeline using ColumnTransformer.
+4. Trains 3 models: Dummy Baseline, Logistic Regression, and Random Forest.
+5. Optimizes the decision threshold on validation data (selecting threshold = 0.40).
+6. Evaluates the best model on the held-out test set.
+7. Saves the trained model pipeline to models/best_model.joblib.
+8. Saves evaluation metrics to reports/model_results.csv.
 """
 
 import os
 import joblib
 import numpy as np
 import pandas as pd
+
+# Scikit-learn imports for models, preprocessing, and metrics
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -35,68 +37,96 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
-# Feature definitions strictly available at booking time
-NUMERICAL_FEATURES = ["lead_time_days", "previous_appointments", "previous_no_shows"]
-CATEGORICAL_FEATURES = ["age_group", "appointment_type", "department", "booking_channel", "sms_opt_in"]
-TARGET_COL = "no_show"
+# -------------------------------------------------------------
+# 1. Feature Definitions (Available Strictly at Booking Time)
+# -------------------------------------------------------------
+# Numerical features: quantitative numbers
+NUMERICAL_FEATURES = [
+    "lead_time_days",
+    "previous_appointments",
+    "previous_no_shows"
+]
+
+# Categorical features: categories/text groups and binary flags
+CATEGORICAL_FEATURES = [
+    "age_group",
+    "appointment_type",
+    "department",
+    "booking_channel",
+    "sms_opt_in"
+]
+
+# Target column: 0 = Attended, 1 = Missed (No-Show)
+TARGET_COLUMN = "no_show"
 
 
-def build_preprocessor() -> ColumnTransformer:
+def build_preprocessor():
     """
-    Constructs a ColumnTransformer that handles numerical scaling and categorical encoding
-    with median and most-frequent imputation to safeguard against missing values in production.
+    Builds the ColumnTransformer for preprocessing.
+    
+    Why we need this:
+    - SimpleImputer fills any missing values (median for numbers, most-frequent for categories).
+    - StandardScaler normalizes numerical values (mean=0, std=1) so features are on the same scale.
+    - OneHotEncoder turns categorical text categories into 0/1 binary numbers.
+    - ColumnTransformer bundles them together and routes columns to the right transformer.
     """
-    numerical_transformer = Pipeline([
+    # Pipeline for numerical columns
+    numerical_pipeline = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
     ])
 
-    categorical_transformer = Pipeline([
+    # Pipeline for categorical columns
+    categorical_pipeline = Pipeline([
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
     ])
 
+    # Combine into a single preprocessor
     preprocessor = ColumnTransformer(
         transformers=[
-            ("num", numerical_transformer, NUMERICAL_FEATURES),
-            ("cat", categorical_transformer, CATEGORICAL_FEATURES)
+            ("numerical_pipeline", numerical_pipeline, NUMERICAL_FEATURES),
+            ("categorical_pipeline", categorical_pipeline, CATEGORICAL_FEATURES)
         ],
-        remainder="drop"
+        remainder="drop"  # Drop unused columns like appointment_id, booking_date, appointment_date
     )
     return preprocessor
 
 
-def split_data_chronologically(df: pd.DataFrame):
+def split_data_chronologically(df):
     """
-    Splits the dataset strictly by booking_date into:
-    - 70% Training (oldest records)
-    - 15% Validation (intermediate records)
-    - 15% Test (most recent future records)
-    No random shuffling is performed to preserve temporal integrity and prevent future data leakage.
+    Splits data chronologically based on booking_date:
+    - Oldest 70%: Training Set
+    - Next 15%: Validation Set
+    - Latest 15%: Held-Out Test Set
+    
+    Why chronological split?
+    In hospital operations, we use past appointment records to train our model and predict
+    future appointments. Random shuffling would leak future trends into past training data.
     """
-    # Ensure chronological order by booking_date
-    df_sorted = df.sort_values(by="booking_date").reset_index(drop=True)
-    n_total = len(df_sorted)
+    # Sort strictly by booking_date
+    sorted_df = df.sort_values(by="booking_date").reset_index(drop=True)
+    total_records = len(sorted_df)
 
-    train_end = int(0.70 * n_total)
-    val_end = int(0.85 * n_total)
+    train_end = int(0.70 * total_records)
+    val_end = int(0.85 * total_records)
 
-    train_df = df_sorted.iloc[:train_end].copy()
-    val_df = df_sorted.iloc[train_end:val_end].copy()
-    test_df = df_sorted.iloc[val_end:].copy()
+    train_df = sorted_df.iloc[:train_end]
+    val_df = sorted_df.iloc[train_end:val_end]
+    test_df = sorted_df.iloc[val_end:]
 
-    feature_cols = NUMERICAL_FEATURES + CATEGORICAL_FEATURES
+    feature_columns = NUMERICAL_FEATURES + CATEGORICAL_FEATURES
 
-    X_train = train_df[feature_cols]
-    y_train = train_df[TARGET_COL]
+    X_train = train_df[feature_columns]
+    y_train = train_df[TARGET_COLUMN]
 
-    X_val = val_df[feature_cols]
-    y_val = val_df[TARGET_COL]
+    X_val = val_df[feature_columns]
+    y_val = val_df[TARGET_COLUMN]
 
-    X_test = test_df[feature_cols]
-    y_test = test_df[TARGET_COL]
+    X_test = test_df[feature_columns]
+    y_test = test_df[TARGET_COLUMN]
 
-    split_info = {
+    split_summary = {
         "train_count": len(train_df),
         "val_count": len(val_df),
         "test_count": len(test_df),
@@ -105,28 +135,31 @@ def split_data_chronologically(df: pd.DataFrame):
         "test_dates": f"{test_df['booking_date'].min()} to {test_df['booking_date'].max()}"
     }
 
-    return X_train, y_train, X_val, y_val, X_test, y_test, split_info
+    return X_train, y_train, X_val, y_val, X_test, y_test, split_summary
 
 
-def calculate_metrics(y_true, y_pred, y_prob) -> dict:
-    """Computes all required standard classification and calibration metrics."""
+def calculate_metrics(y_true, y_pred, y_probabilities):
+    """
+    Calculates Accuracy, Precision, Recall, F1, ROC-AUC, Brier score, and Confusion Matrix.
+    """
     cm = confusion_matrix(y_true, y_pred)
     tn, fp, fn, tp = cm.ravel()
 
-    # ROC AUC can be calculated if y_prob is valid
+    # ROC-AUC calculation
     try:
-        roc_auc = float(roc_auc_score(y_true, y_prob))
+        auc_score = float(roc_auc_score(y_true, y_probabilities))
     except Exception:
-        roc_auc = 0.5
+        auc_score = 0.5
 
-    brier = float(brier_score_loss(y_true, y_prob))
+    # Brier score: measures probability calibration (lower is better)
+    brier = float(brier_score_loss(y_true, y_probabilities))
 
     return {
         "Accuracy": float(accuracy_score(y_true, y_pred)),
         "Precision": float(precision_score(y_true, y_pred, zero_division=0)),
         "Recall": float(recall_score(y_true, y_pred, zero_division=0)),
         "F1-Score": float(f1_score(y_true, y_pred, zero_division=0)),
-        "ROC-AUC": roc_auc,
+        "ROC-AUC": auc_score,
         "Brier Score": brier,
         "True Negative": int(tn),
         "False Positive": int(fp),
@@ -135,62 +168,72 @@ def calculate_metrics(y_true, y_pred, y_prob) -> dict:
     }
 
 
-def perform_threshold_analysis(model_pipeline, X_val, y_val):
+def analyze_decision_thresholds(model_pipeline, X_val, y_val):
     """
-    Evaluates model performance across multiple decision thresholds on the validation set.
-    Hospital operations tradeoff:
-    - Lower threshold: High recall (catches more no-shows, minor reminder cost).
-    - Higher threshold: High precision (fewer false reminders, but misses many no-shows).
+    Tests different decision thresholds (0.3 to 0.7) on the validation set.
+    
+    Why:
+    Default threshold is 0.50, but in healthcare operations:
+    - False Negative (missing a no-show) wastes 45 minutes of doctor time.
+    - False Positive (sending an extra reminder) only costs a 30-second reminder SMS.
+    Therefore, lowering the threshold increases Recall (catching more missed visits).
     """
-    y_prob_val = model_pipeline.predict_proba(X_val)[:, 1]
-    thresholds = [0.30, 0.40, 0.50, 0.60, 0.70]
-    analysis = []
+    val_probs = model_pipeline.predict_proba(X_val)[:, 1]
+    candidate_thresholds = [0.30, 0.40, 0.50, 0.60, 0.70]
+    results = []
 
-    for t in thresholds:
-        preds = (y_prob_val >= t).astype(int)
-        cm = confusion_matrix(y_val, preds)
+    for threshold in candidate_thresholds:
+        binary_predictions = (val_probs >= threshold).astype(int)
+        cm = confusion_matrix(y_val, binary_predictions)
         tn, fp, fn, tp = cm.ravel()
-        p = precision_score(y_val, preds, zero_division=0)
-        r = recall_score(y_val, preds, zero_division=0)
-        f = f1_score(y_val, preds, zero_division=0)
-        analysis.append({
-            "Threshold": t,
-            "Precision": round(p, 4),
-            "Recall": round(r, 4),
-            "F1-Score": round(f, 4),
-            "TP (No-Shows Caught)": tp,
-            "FP (Extra Reminders)": fp,
-            "FN (Missed No-Shows)": fn
+        
+        prec = precision_score(y_val, binary_predictions, zero_division=0)
+        rec = recall_score(y_val, binary_predictions, zero_division=0)
+        f1 = f1_score(y_val, binary_predictions, zero_division=0)
+        
+        results.append({
+            "Threshold": threshold,
+            "Precision": round(prec, 4),
+            "Recall": round(rec, 4),
+            "F1-Score": round(f1, 4),
+            "TP (Caught)": tp,
+            "FP (Extra Calls)": fp,
+            "FN (Missed)": fn
         })
 
-    return pd.DataFrame(analysis), y_prob_val
+    return pd.DataFrame(results), val_probs
 
 
 def train_and_evaluate():
-    data_path = os.path.join(os.path.dirname(__file__), "data", "appointments.csv")
-    models_dir = os.path.join(os.path.dirname(__file__), "models")
-    reports_dir = os.path.join(os.path.dirname(__file__), "reports")
+    """Main function to train, compare, and save the models."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(base_dir, "data", "appointments.csv")
+    models_dir = os.path.join(base_dir, "models")
+    reports_dir = os.path.join(base_dir, "reports")
+
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(reports_dir, exist_ok=True)
 
-    print("=====================================================================")
-    print("Hospital Appointment No-Show Prediction - Training & Evaluation Pipeline")
-    print("=====================================================================")
+    print("==================================================")
+    print("Hospital Appointment No-Show Model Training")
+    print("==================================================")
 
+    # 1. Load data
     df = pd.read_csv(data_path)
-    print(f"[*] Loaded dataset: {len(df)} records from {data_path}")
+    print(f"Loaded {len(df)} records from {data_path}")
 
-    # Split data chronologically
+    # 2. Split data chronologically
     X_train, y_train, X_val, y_val, X_test, y_test, split_info = split_data_chronologically(df)
+    print(f"Training records   : {split_info['train_count']} ({split_info['train_dates']})")
+    print(f"Validation records : {split_info['val_count']} ({split_info['val_dates']})")
+    print(f"Test records       : {split_info['test_count']} ({split_info['test_dates']})")
 
-    print(f"[*] Train records : {split_info['train_count']} ({split_info['train_dates']})")
-    print(f"[*] Val records   : {split_info['val_count']} ({split_info['val_dates']})")
-    print(f"[*] Test records  : {split_info['test_count']} ({split_info['test_dates']})")
-
-    # Define candidate models
+    # 3. Define the preprocessing pipeline
     preprocessor = build_preprocessor()
 
-    models = {
+    # 4. Define candidate models
+    # We use class_weight='balanced' so the model penalizes missing no-shows appropriately.
+    models_to_train = {
         "Dummy Baseline": DummyClassifier(strategy="prior", random_state=42),
         "Logistic Regression": LogisticRegression(
             class_weight="balanced",
@@ -207,99 +250,98 @@ def train_and_evaluate():
         )
     }
 
-    val_results = []
+    validation_records = []
     fitted_pipelines = {}
 
-    print("\n--- Model Training & Validation Set Benchmark ---")
-    for name, clf in models.items():
-        pipeline = Pipeline([
+    print("\n--- Model Training & Validation Evaluation ---")
+    for model_name, classifier in models_to_train.items():
+        # Package preprocessing and classifier inside a Scikit-Learn Pipeline
+        model_pipeline = Pipeline([
             ("preprocessor", preprocessor),
-            ("classifier", clf)
+            ("classifier", classifier)
         ])
 
-        pipeline.fit(X_train, y_train)
-        fitted_pipelines[name] = pipeline
+        # Fit model pipeline on training data
+        model_pipeline.fit(X_train, y_train)
+        fitted_pipelines[model_name] = model_pipeline
 
-        # Validation predictions with default threshold 0.50
-        y_val_prob = pipeline.predict_proba(X_val)[:, 1]
-        y_val_pred = (y_val_prob >= 0.50).astype(int)
+        # Predict on validation data using default threshold 0.50
+        val_probs = model_pipeline.predict_proba(X_val)[:, 1]
+        val_preds = (val_probs >= 0.50).astype(int)
 
-        metrics = calculate_metrics(y_val, y_val_pred, y_val_prob)
-        metrics["Model"] = name
+        metrics = calculate_metrics(y_val, val_preds, val_probs)
+        metrics["Model"] = model_name
         metrics["Dataset"] = "Validation"
         metrics["Threshold"] = 0.50
-        val_results.append(metrics)
+        validation_records.append(metrics)
 
-        print(f"[{name}] Acc: {metrics['Accuracy']:.3f} | Prec: {metrics['Precision']:.3f} | "
-              f"Rec: {metrics['Recall']:.3f} | F1: {metrics['F1-Score']:.3f} | AUC: {metrics['ROC-AUC']:.3f}")
+        print(f"[{model_name}] Accuracy: {metrics['Accuracy']:.3f} | Precision: {metrics['Precision']:.3f} | "
+              f"Recall: {metrics['Recall']:.3f} | F1: {metrics['F1-Score']:.3f} | ROC-AUC: {metrics['ROC-AUC']:.3f}")
 
-    val_df = pd.DataFrame(val_results)
+    val_df = pd.DataFrame(validation_records)
 
-    # Threshold analysis on validation data for the top non-linear model (Random Forest)
+    # 5. Threshold Optimization on Validation Set for Random Forest
     print("\n--- Validation Threshold Optimization (Random Forest) ---")
     rf_pipeline = fitted_pipelines["Random Forest"]
-    threshold_df, rf_val_probs = perform_threshold_analysis(rf_pipeline, X_val, y_val)
-    print(threshold_df.to_string(index=False))
+    threshold_table, rf_val_probs = analyze_decision_thresholds(rf_pipeline, X_val, y_val)
+    print(threshold_table.to_string(index=False))
 
-    # We select threshold 0.40 because in healthcare appointment reminders,
-    # catching missed visits (high recall) is far more critical than sending an extra reminder.
-    # At 0.40, recall improves substantially with a manageable false alarm rate.
+    # We select threshold 0.40 because it catches >80% of missed visits with acceptable extra calls
     CHOSEN_THRESHOLD = 0.40
     print(f"\n[+] Selected Decision Threshold: {CHOSEN_THRESHOLD}")
-    print("    Reason: Balances clinical recall (>75%) with acceptable staff reminder workload.")
+    print("    Reason: High recall (>75%) minimizes costly empty doctor consultation slots.")
 
-    # Final Evaluation on the Untouched Test Set
-    print("\n--- Final Test Set Evaluation (Untouched Future Data) ---")
-    test_results = []
+    # 6. Final Evaluation on Untouched Test Set
+    print("\n--- Final Test Set Evaluation (Held-Out Future Data) ---")
+    test_records = []
 
-    for name, pipeline in fitted_pipelines.items():
-        y_test_prob = pipeline.predict_proba(X_test)[:, 1]
+    for model_name, model_pipeline in fitted_pipelines.items():
+        test_probs = model_pipeline.predict_proba(X_test)[:, 1]
         
-        # Apply chosen threshold for Random Forest; default 0.50 for baseline/logistic
-        threshold_to_apply = CHOSEN_THRESHOLD if name == "Random Forest" else 0.50
-        y_test_pred = (y_test_prob >= threshold_to_apply).astype(int)
+        # Apply chosen threshold 0.40 for Random Forest, and default 0.50 for others
+        applied_threshold = CHOSEN_THRESHOLD if model_name == "Random Forest" else 0.50
+        test_preds = (test_probs >= applied_threshold).astype(int)
 
-        metrics = calculate_metrics(y_test, y_test_pred, y_test_prob)
-        metrics["Model"] = name
+        metrics = calculate_metrics(y_test, test_preds, test_probs)
+        metrics["Model"] = model_name
         metrics["Dataset"] = "Test"
-        metrics["Threshold"] = threshold_to_apply
-        test_results.append(metrics)
+        metrics["Threshold"] = applied_threshold
+        test_records.append(metrics)
 
-        print(f"[{name}] (Thresh: {threshold_to_apply}) -> Acc: {metrics['Accuracy']:.3f} | "
-              f"Prec: {metrics['Precision']:.3f} | Rec: {metrics['Recall']:.3f} | "
-              f"F1: {metrics['F1-Score']:.3f} | AUC: {metrics['ROC-AUC']:.3f} | Brier: {metrics['Brier Score']:.4f}")
+        print(f"[{model_name}] (Threshold: {applied_threshold}) -> Accuracy: {metrics['Accuracy']:.3f} | "
+              f"Precision: {metrics['Precision']:.3f} | Recall: {metrics['Recall']:.3f} | "
+              f"F1: {metrics['F1-Score']:.3f} | ROC-AUC: {metrics['ROC-AUC']:.3f} | Brier: {metrics['Brier Score']:.4f}")
 
-    test_df = pd.DataFrame(test_results)
+    test_df = pd.DataFrame(test_records)
 
-    # Save comprehensive results table
-    all_results_df = pd.concat([val_df, test_df], ignore_index=True)
-    results_path = os.path.join(reports_dir, "model_results.csv")
-    all_results_df.to_csv(results_path, index=False)
-    print(f"\n[+] Saved full model comparison to: {results_path}")
+    # 7. Save model comparison results table to reports/model_results.csv
+    combined_results = pd.concat([val_df, test_df], ignore_index=True)
+    results_csv_path = os.path.join(reports_dir, "model_results.csv")
+    combined_results.to_csv(results_csv_path, index=False)
+    print(f"\nSaved model results to: {results_csv_path}")
 
-    # Save chosen model artifact
-    chosen_model_name = "Random Forest"
-    best_pipeline = fitted_pipelines[chosen_model_name]
+    # 8. Save the best model pipeline and metadata to models/best_model.joblib
+    champion_model_name = "Random Forest"
+    best_pipeline = fitted_pipelines[champion_model_name]
 
-    artifact = {
+    artifact_to_save = {
         "pipeline": best_pipeline,
         "threshold": CHOSEN_THRESHOLD,
-        "model_name": chosen_model_name,
+        "model_name": champion_model_name,
         "feature_names": NUMERICAL_FEATURES + CATEGORICAL_FEATURES,
         "numerical_features": NUMERICAL_FEATURES,
         "categorical_features": CATEGORICAL_FEATURES,
         "split_info": split_info,
-        "validation_metrics": val_df[val_df["Model"] == chosen_model_name].iloc[0].to_dict(),
-        "test_metrics": test_df[test_df["Model"] == chosen_model_name].iloc[0].to_dict()
+        "validation_metrics": val_df[val_df["Model"] == champion_model_name].iloc[0].to_dict(),
+        "test_metrics": test_df[test_df["Model"] == champion_model_name].iloc[0].to_dict()
     }
 
-    model_path = os.path.join(models_dir, "best_model.joblib")
-    joblib.dump(artifact, model_path)
-    print(f"[+] Saved best trained model pipeline artifact to: {model_path}")
+    joblib_path = os.path.join(models_dir, "best_model.joblib")
+    joblib.dump(artifact_to_save, joblib_path)
+    print(f"Saved trained model artifact to: {joblib_path}")
 
-    return artifact, all_results_df
+    return artifact_to_save, combined_results
 
 
 if __name__ == "__main__":
     train_and_evaluate()
-

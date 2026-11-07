@@ -5,14 +5,13 @@ Subtitle: Machine Learning-Based Appointment Reminder Support System
 Assessment: ALGIONS AI LABS PRIVATE LIMITED
 
 This application provides an interactive decision-support interface for hospital operational staff.
-Predictions are strictly advisory; all reminders require human review.
+Predictions are strictly advisory; all reminders require human staff review.
 """
 
 import os
 import joblib
 import pandas as pd
-import numpy as np
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 import streamlit as st
 
 # Custom minimal styling for clean UI
@@ -38,20 +37,16 @@ CSS_STYLE = """
         font-size: 0.95rem;
         margin-bottom: 1.5rem;
     }
-    .metric-card {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 15px;
-        text-align: center;
-    }
 </style>
 """
 
 
 @st.cache_resource
 def load_trained_artifact():
-    """Loads the trained model artifact and metadata from models/best_model.joblib."""
+    """
+    Loads the trained model artifact and metadata from models/best_model.joblib.
+    @st.cache_resource keeps the model in memory so it doesn't reload on every button click.
+    """
     model_path = os.path.join(os.path.dirname(__file__), "models", "best_model.joblib")
     if not os.path.exists(model_path):
         return None
@@ -59,7 +54,9 @@ def load_trained_artifact():
 
 
 def main():
-    # Configure page
+    # -------------------------------------------------------------
+    # 1. Page Configuration & Header
+    # -------------------------------------------------------------
     st.set_page_config(
         page_title="Hospital Appointment No-Show Prediction",
         page_icon="🏥",
@@ -67,27 +64,30 @@ def main():
         initial_sidebar_state="expanded"
     )
     st.markdown(CSS_STYLE, unsafe_allow_html=True)
-    # Header
+
     st.markdown('<div class="main-title">🏥 Hospital Appointment No-Show Prediction</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Machine Learning-Based Appointment Reminder Support System</div>', unsafe_allow_html=True)
 
-    # Permanent Advisory Banner
+    # Permanent Advisory Banner (Crucial for Healthcare Compliance)
     st.markdown("""
     <div class="advisory-box">
-        <strong>⚠️ Decision-Support Advisory Notice:</strong>
-        This system predicts operational appointment attendance risk to assist administrative staff in allocating reminder calls.
-        It does <strong>NOT</strong> predict clinical outcomes, medical diagnosis, treatment necessity, or triage urgency.
-        All reminder decisions must be reviewed and confirmed by human staff.
+        <strong>⚠️ Clinical Decision-Support Notice:</strong>
+        This system predicts operational appointment attendance risk to assist administrative staff in scheduling reminder calls.
+        It does <strong>NOT</strong> predict clinical urgency, diagnoses, treatment necessity, or triage outcomes.
+        All reminder decisions must be reviewed and confirmed by human hospital staff.
     </div>
     """, unsafe_allow_html=True)
 
-    # Navigation
-    menu = st.sidebar.radio(
-        "Navigation",
+    # -------------------------------------------------------------
+    # 2. Navigation Sidebar
+    # -------------------------------------------------------------
+    navigation_option = st.sidebar.radio(
+        "Navigation Menu",
         ["Section A: Home", "Section B: Prediction", "Section C: Model Performance"],
         index=1  # Default to Prediction tab for reviewers
     )
 
+    # Load saved model artifact
     artifact = load_trained_artifact()
     if artifact is None:
         st.error("⚠️ Trained model artifact not found! Please run `python train_model.py` in your terminal first.")
@@ -101,7 +101,7 @@ def main():
     # =========================================================================
     # SECTION A: HOME
     # =========================================================================
-    if menu == "Section A: Home":
+    if navigation_option == "Section A: Home":
         st.header("📌 Project Objective & Overview")
         col1, col2 = st.columns([3, 2])
 
@@ -145,7 +145,7 @@ def main():
     # =========================================================================
     # SECTION B: PREDICTION
     # =========================================================================
-    elif menu == "Section B: Prediction":
+    elif navigation_option == "Section B: Prediction":
         st.header("🔍 Outpatient Appointment Prediction Form")
         st.write("Enter the appointment details known at the time of booking to calculate attendance probability.")
 
@@ -284,7 +284,7 @@ def main():
     # =========================================================================
     # SECTION C: MODEL PERFORMANCE
     # =========================================================================
-    elif menu == "Section C: Model Performance":
+    elif navigation_option == "Section C: Model Performance":
         st.header("📈 Model Evaluation & Comparative Diagnostics")
         st.write("Rigorous evaluation on the held-out chronological test set (unseen future appointments).")
 

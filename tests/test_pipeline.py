@@ -1,17 +1,17 @@
 """
-test_pipeline.py - Pytest Verification Suite for Hospital No-Show Prediction
+test_pipeline.py - Automated Unit & Integration Tests
 Project: Hospital Appointment No-Show Prediction
 Assessment: ALGIONS AI LABS PRIVATE LIMITED
 
-Tests cover:
-1. Dataset generation & row count
-2. Schema & required columns
-3. Invalid date & constraint logic
-4. Preprocessing pipeline functionality
-5. Model artifact loading & integrity
-6. Output probability bounds [0, 1]
-7. End-to-end sample appointment inference
-8. Prediction determinism & consistency
+This test suite verifies:
+1. Dataset file exists and has >= 3,000 rows.
+2. All 12 required columns are present with valid schema.
+3. No invalid negative lead times exist in the dataset.
+4. Saved model artifact (best_model.joblib) loads and contains pipeline and threshold.
+5. Preprocessing pipeline correctly scales numbers and encodes categories without NaNs.
+6. Model output probabilities are strictly bounded in [0.0, 1.0].
+7. End-to-end sample inference produces valid types and recommendations.
+8. Model predictions are consistent and deterministic across repeated calls.
 """
 
 import os
@@ -19,25 +19,25 @@ import joblib
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import date
 
-# Paths
+# Define absolute paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(BASE_DIR, "data", "appointments.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "models", "best_model.joblib")
 
 
-def test_dataset_generation():
-    """Verify that the synthetic dataset exists and meets the minimum >= 3,000 records requirement."""
-    assert os.path.exists(DATA_PATH), f"Dataset file missing at {DATA_PATH}"
+def test_01_dataset_exists_and_meets_record_count():
+    """Verify that the synthetic dataset exists and meets the >= 3,000 records requirement."""
+    assert os.path.exists(DATA_PATH), f"Dataset file not found at: {DATA_PATH}"
     df = pd.read_csv(DATA_PATH)
     assert len(df) >= 3000, f"Expected at least 3,000 records, but found {len(df)}"
 
 
-def test_required_columns():
-    """Verify that all required columns are present in the dataset."""
+def test_02_dataset_has_all_required_columns():
+    """Verify that all 12 required features and target columns are present."""
     df = pd.read_csv(DATA_PATH)
-    expected_cols = [
+    expected_columns = [
         "appointment_id",
         "booking_date",
         "appointment_date",
@@ -51,46 +51,41 @@ def test_required_columns():
         "lead_time_days",
         "no_show"
     ]
-    for col in expected_cols:
-        assert col in df.columns, f"Required column '{col}' is missing from dataset"
+    for column_name in expected_columns:
+        assert column_name in df.columns, f"Required column '{column_name}' missing from dataset"
 
 
-def test_invalid_date_handling():
-    """Verify that date logic flags or rejects appointment dates that occur before booking dates."""
-    booking_date = date(2025, 5, 10)
-    invalid_appt_date = date(2025, 5, 5)  # 5 days in past!
-
-    lead_time = (invalid_appt_date - booking_date).days
-    assert lead_time < 0, "Lead time should be negative for an invalid past date"
-
-    # Verify that in our dataset, no lead time is negative
+def test_03_no_negative_lead_times_in_dataset():
+    """Verify that no appointment has an invalid date (appointment before booking date)."""
     df = pd.read_csv(DATA_PATH)
     negative_lead_times = (df["lead_time_days"] < 0).sum()
-    assert negative_lead_times == 0, f"Found {negative_lead_times} negative lead time rows in dataset"
+    assert negative_lead_times == 0, f"Found {negative_lead_times} negative lead time records"
 
 
-def test_model_artifact_loading():
-    """Verify that the saved model artifact exists, loads cleanly, and contains all required keys."""
-    assert os.path.exists(MODEL_PATH), f"Model artifact missing at {MODEL_PATH}"
+def test_04_saved_model_artifact_contains_required_keys():
+    """Verify that the saved model artifact loads cleanly and contains pipeline and threshold."""
+    assert os.path.exists(MODEL_PATH), f"Model artifact not found at: {MODEL_PATH}"
     artifact = joblib.load(MODEL_PATH)
 
+    # Check required dictionary keys
     assert "pipeline" in artifact, "Artifact missing 'pipeline' key"
     assert "threshold" in artifact, "Artifact missing 'threshold' key"
     assert "feature_names" in artifact, "Artifact missing 'feature_names' key"
     assert "model_name" in artifact, "Artifact missing 'model_name' key"
 
-    assert 0.0 < artifact["threshold"] < 1.0, f"Threshold {artifact['threshold']} is out of valid range (0, 1)"
+    # Verify operating threshold is valid
+    assert 0.0 < artifact["threshold"] < 1.0, f"Threshold {artifact['threshold']} is out of valid range"
 
 
-def test_preprocessing_pipeline():
-    """Verify that the preprocessor in the pipeline correctly transforms raw data without NaN values."""
+def test_05_preprocessing_pipeline_handles_sample_input():
+    """Verify that the preprocessor correctly transforms numerical and categorical data without NaNs."""
     artifact = joblib.load(MODEL_PATH)
     pipeline = artifact["pipeline"]
     preprocessor = pipeline.named_steps["preprocessor"]
 
-    sample_input = pd.DataFrame([{
-        "lead_time_days": 12,
-        "previous_appointments": 4,
+    sample_appointment = pd.DataFrame([{
+        "lead_time_days": 10,
+        "previous_appointments": 3,
         "previous_no_shows": 1,
         "age_group": "Middle-Aged (36-55)",
         "appointment_type": "Specialist Consultation",
@@ -99,19 +94,19 @@ def test_preprocessing_pipeline():
         "sms_opt_in": 1
     }])
 
-    transformed = preprocessor.transform(sample_input)
-    assert not np.isnan(transformed).any(), "Transformed feature matrix contains unexpected NaN values"
-    assert transformed.shape[1] > 0, "Transformed feature matrix has zero columns"
+    transformed_data = preprocessor.transform(sample_appointment)
+    assert not np.isnan(transformed_data).any(), "Transformed feature matrix contains unexpected NaNs"
+    assert transformed_data.shape[1] > 0, "Transformed feature matrix has zero columns"
 
 
-def test_prediction_probability_bounds():
-    """Verify that the predicted no-show probability is strictly bounded between 0.0 and 1.0."""
+def test_06_predicted_probabilities_are_between_0_and_1():
+    """Verify that predict_proba returns probabilities strictly bounded between 0.0 and 1.0."""
     artifact = joblib.load(MODEL_PATH)
     pipeline = artifact["pipeline"]
 
     test_samples = pd.DataFrame([
         {
-            "lead_time_days": 0,
+            "lead_time_days": 1,
             "previous_appointments": 5,
             "previous_no_shows": 0,
             "age_group": "Seniors (71+)",
@@ -121,8 +116,8 @@ def test_prediction_probability_bounds():
             "sms_opt_in": 1
         },
         {
-            "lead_time_days": 40,
-            "previous_appointments": 3,
+            "lead_time_days": 35,
+            "previous_appointments": 4,
             "previous_no_shows": 3,
             "age_group": "Young Adults (18-35)",
             "appointment_type": "Routine Checkup",
@@ -133,17 +128,17 @@ def test_prediction_probability_bounds():
     ])
 
     probabilities = pipeline.predict_proba(test_samples)[:, 1]
-    for p in probabilities:
-        assert 0.0 <= p <= 1.0, f"Predicted probability {p} is outside [0.0, 1.0]"
+    for prob in probabilities:
+        assert 0.0 <= prob <= 1.0, f"Probability {prob} is outside valid range [0, 1]"
 
 
-def test_valid_prediction_sample():
-    """Verify inference on a representative appointment record."""
+def test_07_sample_prediction_formats_and_types():
+    """Verify end-to-end inference on a single representative patient appointment."""
     artifact = joblib.load(MODEL_PATH)
     pipeline = artifact["pipeline"]
     threshold = artifact["threshold"]
 
-    sample = pd.DataFrame([{
+    sample_patient = pd.DataFrame([{
         "lead_time_days": 14,
         "previous_appointments": 2,
         "previous_no_shows": 0,
@@ -154,22 +149,22 @@ def test_valid_prediction_sample():
         "sms_opt_in": 1
     }])
 
-    prob = pipeline.predict_proba(sample)[0, 1]
+    prob = float(pipeline.predict_proba(sample_patient)[0, 1])
     is_suggested = bool(prob >= threshold)
 
-    assert isinstance(prob, float)
-    assert isinstance(is_suggested, bool)
-    assert 0.0 <= prob <= 1.0
+    assert isinstance(prob, float), "Predicted probability must be a float"
+    assert isinstance(is_suggested, bool), "Decision flag must be a boolean"
+    assert 0.0 <= prob <= 1.0, "Probability must be between 0 and 1"
 
 
-def test_prediction_consistency():
-    """Verify that calling predict_proba multiple times on identical input yields deterministic results."""
+def test_08_prediction_is_deterministic_and_consistent():
+    """Verify that calling predict_proba multiple times on identical input yields the exact same score."""
     artifact = joblib.load(MODEL_PATH)
     pipeline = artifact["pipeline"]
 
-    sample = pd.DataFrame([{
-        "lead_time_days": 10,
-        "previous_appointments": 3,
+    sample_patient = pd.DataFrame([{
+        "lead_time_days": 8,
+        "previous_appointments": 2,
         "previous_no_shows": 1,
         "age_group": "Young Adults (18-35)",
         "appointment_type": "Follow-up",
@@ -178,9 +173,8 @@ def test_prediction_consistency():
         "sms_opt_in": 0
     }])
 
-    prob_1 = pipeline.predict_proba(sample)[0, 1]
-    prob_2 = pipeline.predict_proba(sample)[0, 1]
-    prob_3 = pipeline.predict_proba(sample)[0, 1]
+    prob_1 = pipeline.predict_proba(sample_patient)[0, 1]
+    prob_2 = pipeline.predict_proba(sample_patient)[0, 1]
+    prob_3 = pipeline.predict_proba(sample_patient)[0, 1]
 
     assert prob_1 == prob_2 == prob_3, "Predictions are non-deterministic for identical inputs"
-
