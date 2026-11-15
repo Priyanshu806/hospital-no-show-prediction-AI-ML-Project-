@@ -9,12 +9,14 @@ Predictions are strictly advisory; all reminders require human staff review.
 """
 
 import os
+import warnings
+warnings.filterwarnings("ignore")
+
 import joblib
 import pandas as pd
 from datetime import date, timedelta
 import streamlit as st
 
-# Custom minimal styling for clean UI
 CSS_STYLE = """
 <style>
     .main-title {
@@ -41,22 +43,31 @@ CSS_STYLE = """
 """
 
 
+def find_file(relative_subpath):
+    """Robust path finder that checks current dir, script dir, and subfolder."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(current_dir, relative_subpath),
+        os.path.join(current_dir, "hospital-no-show-prediction", relative_subpath),
+        os.path.join("hospital-no-show-prediction", relative_subpath),
+        os.path.join(relative_subpath)
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
 @st.cache_resource
 def load_trained_artifact():
-    """
-    Loads the trained model artifact and metadata from models/best_model.joblib.
-    @st.cache_resource keeps the model in memory so it doesn't reload on every button click.
-    """
-    model_path = os.path.join(os.path.dirname(__file__), "models", "best_model.joblib")
+    """Loads the trained model artifact and metadata from best_model.joblib."""
+    model_path = find_file(os.path.join("models", "best_model.joblib"))
     if not os.path.exists(model_path):
         return None
     return joblib.load(model_path)
 
 
 def main():
-    # -------------------------------------------------------------
-    # 1. Page Configuration & Header
-    # -------------------------------------------------------------
     st.set_page_config(
         page_title="Hospital Appointment No-Show Prediction",
         page_icon="🏥",
@@ -78,16 +89,12 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # -------------------------------------------------------------
-    # 2. Navigation Sidebar
-    # -------------------------------------------------------------
     navigation_option = st.sidebar.radio(
         "Navigation Menu",
         ["Section A: Home", "Section B: Prediction", "Section C: Model Performance"],
         index=1  # Default to Prediction tab for reviewers
     )
 
-    # Load saved model artifact
     artifact = load_trained_artifact()
     if artifact is None:
         st.error("⚠️ Trained model artifact not found! Please run `python train_model.py` in your terminal first.")
@@ -232,7 +239,7 @@ def main():
 
             # 3. Model Inference via Saved Pipeline
             with st.spinner("Processing through trained ML pipeline..."):
-                predicted_prob = pipeline.predict_proba(input_df)[0, 1]
+                predicted_prob = float(pipeline.predict_proba(input_df)[0, 1])
                 prob_percentage = round(predicted_prob * 100, 1)
 
             st.markdown("### 📊 Prediction Results")
@@ -289,7 +296,7 @@ def main():
         st.write("Rigorous evaluation on the held-out chronological test set (unseen future appointments).")
 
         # Load results CSV
-        results_csv = os.path.join(os.path.dirname(__file__), "reports", "model_results.csv")
+        results_csv = find_file(os.path.join("reports", "model_results.csv"))
         if os.path.exists(results_csv):
             res_df = pd.read_csv(results_csv)
             test_res = res_df[res_df["Dataset"] == "Test"].copy()
@@ -305,23 +312,18 @@ def main():
 
         st.subheader("2. Diagnostic Visualizations")
         fig_col1, fig_col2 = st.columns(2)
-        fig_dir = os.path.join(os.path.dirname(__file__), "reports", "figures")
 
         with fig_col1:
-            cm_img = os.path.join(fig_dir, "06_confusion_matrix.png")
+            cm_img = find_file(os.path.join("reports", "figures", "06_confusion_matrix.png"))
             if os.path.exists(cm_img):
                 st.image(cm_img, caption="Confusion Matrix on Untouched Test Set", use_container_width=True)
-            else:
-                st.info("Confusion matrix image not yet generated. Run `evaluate_model.py`.")
 
         with fig_col2:
-            roc_img = os.path.join(fig_dir, "07_roc_curve.png")
+            roc_img = find_file(os.path.join("reports", "figures", "07_roc_curve.png"))
             if os.path.exists(roc_img):
                 st.image(roc_img, caption="ROC Curve with Selected Operating Point", use_container_width=True)
-            else:
-                st.info("ROC Curve image not yet generated.")
 
-        calib_img = os.path.join(fig_dir, "08_calibration_curve.png")
+        calib_img = find_file(os.path.join("reports", "figures", "08_calibration_curve.png"))
         if os.path.exists(calib_img):
             st.image(calib_img, caption="Reliability Diagram (Probability Calibration)", use_container_width=True)
 
@@ -334,7 +336,7 @@ def main():
           *Cost:* 30-45 minutes of wasted doctor/nurse clinical time, idle examination equipment, and an appointment lost to another sick patient on the waitlist. Very high impact!
         
         **Conclusion:** By choosing a calibrated decision threshold of **0.40** instead of 0.50, our system maximizes 
-        **Recall (catching >78% of all no-shows)** at the price of small, harmless extra reminder messages.
+        **Recall (catching >84% of all no-shows)** at the price of small, harmless extra reminder messages.
         """)
 
 

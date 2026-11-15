@@ -11,36 +11,51 @@ runs diagnostics on the held-out chronological test set, and generates:
 """
 
 import os
+import warnings
+warnings.filterwarnings("ignore")
+
 import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Scikit-learn diagnostic metric functions
 from sklearn.metrics import confusion_matrix, roc_curve, auc, brier_score_loss
 from sklearn.calibration import calibration_curve
 
-# Configure clean plotting style
 plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
 plt.rcParams.update({"font.size": 11, "figure.autolayout": True})
 
 
+def find_file(relative_subpath):
+    """Finds path regardless of current execution directory."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(current_dir, relative_subpath),
+        os.path.join(current_dir, "hospital-no-show-prediction", relative_subpath),
+        os.path.join("hospital-no-show-prediction", relative_subpath),
+        os.path.join(relative_subpath)
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
 def evaluate_and_plot():
     """Loads the champion model artifact and generates test diagnostic plots."""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(base_dir, "models", "best_model.joblib")
-    data_path = os.path.join(base_dir, "data", "appointments.csv")
-    figures_dir = os.path.join(base_dir, "reports", "figures")
+    model_path = find_file(os.path.join("models", "best_model.joblib"))
+    data_path = find_file(os.path.join("data", "appointments.csv"))
+    
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    figures_dir = os.path.join(current_dir, "reports", "figures")
     os.makedirs(figures_dir, exist_ok=True)
 
     print("==================================================")
     print("Standalone Model Evaluation & Diagnostic Report")
     print("==================================================")
 
-    # -------------------------------------------------------------
-    # Step 1: Load the Saved Model Artifact
-    # -------------------------------------------------------------
+    # 1. Load Model Artifact
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Artifact not found at {model_path}. Please run train_model.py first.")
 
@@ -53,11 +68,8 @@ def evaluate_and_plot():
     print(f"Loaded Champion Model  : {model_name}")
     print(f"Operating Threshold    : {threshold}")
 
-    # -------------------------------------------------------------
-    # Step 2: Load the Held-Out Test Data
-    # -------------------------------------------------------------
+    # 2. Load Held-Out Test Data
     df = pd.read_csv(data_path)
-    # Re-apply the chronological test slice (latest 15% of records)
     sorted_df = df.sort_values(by="booking_date").reset_index(drop=True)
     val_end = int(0.85 * len(sorted_df))
     test_df = sorted_df.iloc[val_end:]
@@ -70,18 +82,11 @@ def evaluate_and_plot():
     print(f"Actual No-Shows (1)    : {(y_test == 1).sum()}")
     print(f"Actual Attended (0)    : {(y_test == 0).sum()}")
 
-    # -------------------------------------------------------------
-    # Step 3: Run Model Predictions
-    # -------------------------------------------------------------
-    # predict_proba returns probabilities for both classes [P(0), P(1)]
-    # Column index 1 is P(no_show)
+    # 3. Model Predictions
     test_probabilities = pipeline.predict_proba(X_test)[:, 1]
-    # Apply our chosen operational threshold (0.40)
     test_predictions = (test_probabilities >= threshold).astype(int)
 
-    # -------------------------------------------------------------
-    # Step 4: Confusion Matrix Plot
-    # -------------------------------------------------------------
+    # 4. Confusion Matrix Plot
     cm = confusion_matrix(y_test, test_predictions)
     tn, fp, fn, tp = cm.ravel()
 
@@ -112,9 +117,7 @@ def evaluate_and_plot():
     plt.close()
     print(f"Saved Confusion Matrix : {cm_path}")
 
-    # -------------------------------------------------------------
-    # Step 5: ROC Curve Plot
-    # -------------------------------------------------------------
+    # 5. ROC Curve Plot
     fpr, tpr, _ = roc_curve(y_test, test_probabilities)
     roc_auc = auc(fpr, tpr)
 
@@ -122,7 +125,6 @@ def evaluate_and_plot():
     plt.plot(fpr, tpr, color="#2980b9", lw=2.5, label=f"{model_name} (AUC = {roc_auc:.3f})")
     plt.plot([0, 1], [0, 1], color="#7f8c8d", lw=1.5, linestyle="--", label="Random Guessing (AUC = 0.500)")
     
-    # Mark the chosen operating point (threshold 0.40)
     operating_fpr = fp / (fp + tn)
     operating_tpr = tp / (tp + fn)
     plt.scatter([operating_fpr], [operating_tpr], color="#e74c3c", s=100, zorder=5,
@@ -141,10 +143,7 @@ def evaluate_and_plot():
     plt.close()
     print(f"Saved ROC Curve        : {roc_path}")
 
-    # -------------------------------------------------------------
-    # Step 6: Probability Calibration Curve (Reliability Diagram)
-    # -------------------------------------------------------------
-    # Calibration checks if a predicted 70% probability actually results in 70% of visits being missed
+    # 6. Probability Calibration Curve
     fraction_of_positives, mean_predicted_value = calibration_curve(
         y_test, test_probabilities, n_bins=6, strategy="uniform"
     )
@@ -165,9 +164,7 @@ def evaluate_and_plot():
     plt.close()
     print(f"Saved Calibration Curve: {calib_path}")
 
-    # -------------------------------------------------------------
-    # Step 7: Print Human-Readable Summary for Technical Viva
-    # -------------------------------------------------------------
+    # 7. Print Human-Readable Summary
     acc = artifact['test_metrics']['Accuracy']
     prec = artifact['test_metrics']['Precision']
     rec = artifact['test_metrics']['Recall']
