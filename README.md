@@ -93,7 +93,6 @@ hospital-no-show-prediction/
 ├── predict.py                 # Fast command-line inference tool for interviews
 ├── requirements.txt           # Python dependencies
 ├── README.md                  # Comprehensive project documentation
-├── VIVA_GUIDE.md              # 30 Technical Viva Q&As + Hinglish explanations
 ├── SUBMISSION_FORM.md         # Pre-filled internship submission form
 ├── .gitignore                 # Python gitignore rules
 │
